@@ -127,10 +127,8 @@ class AnchorCreator:
         # negative_zeros_mask = []
         gt_bboxes = labels_and_boxes[:, 1:]
         gt_bboxes_xywh = np.zeros(gt_bboxes.shape)
-        gt_bboxes_xywh[:, 0] = (gt_bboxes[:, 0] + gt_bboxes[:, 2]) * 0.5
-        gt_bboxes_xywh[:, 1] = (gt_bboxes[:, 1] + gt_bboxes[:, 3]) * 0.5
-        gt_bboxes_xywh[:, 2] = gt_bboxes[:, 2] - gt_bboxes[:, 0]
-        gt_bboxes_xywh[:, 3] = gt_bboxes[:, 3] - gt_bboxes[:, 1]
+        gt_bboxes_xywh[:, [0, 1]] = (gt_bboxes[:, [0, 1]] + gt_bboxes[:, [2, 3]]) * 0.5
+        gt_bboxes_xywh[:, [2, 3]] = gt_bboxes[:, [2, 3]] - gt_bboxes[:, [0, 1]]
 
         gt_bboxes_area = area(gt_bboxes)
         labels = np.zeros((self.anchors.shape[0], 2), np.int32) - 1
@@ -173,7 +171,8 @@ class AnchorCreator:
             all_anchors_xywh = self.anchors_xywh[all_anchors_index, :]
             gt_locs = np.zeros((len(all_anchors_index), 5))
             gt_locs[:, 0] = all_anchors_index
-            gt_locs[:, 1] = all_anchors_xywh[:, 0] - gt_bboxes_xywh
+            gt_locs[:, [1, 2]] = (all_anchors_xywh[:, [0, 1]] - gt_bboxes_xywh[i, [0, 1]]) / gt_bboxes_xywh[i, [0, 1]]
+            gt_locs[:, [3, 4]] = 
 
 
         # 负样本

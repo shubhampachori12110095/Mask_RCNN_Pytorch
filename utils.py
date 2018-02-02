@@ -126,6 +126,12 @@ class AnchorCreator:
         negative_candidate_mask = []
         # negative_zeros_mask = []
         gt_bboxes = labels_and_boxes[:, 1:]
+        gt_bboxes_xywh = np.zeros(gt_bboxes.shape)
+        gt_bboxes_xywh[:, 0] = (gt_bboxes[:, 0] + gt_bboxes[:, 2]) * 0.5
+        gt_bboxes_xywh[:, 1] = (gt_bboxes[:, 1] + gt_bboxes[:, 3]) * 0.5
+        gt_bboxes_xywh[:, 2] = gt_bboxes[:, 2] - gt_bboxes[:, 0]
+        gt_bboxes_xywh[:, 3] = gt_bboxes[:, 3] - gt_bboxes[:, 1]
+
         gt_bboxes_area = area(gt_bboxes)
         labels = np.zeros((self.anchors.shape[0], 2), np.int32) - 1
         for i, gt_bbox in enumerate(gt_bboxes):
@@ -159,6 +165,17 @@ class AnchorCreator:
             labels[positive_topest_index[-1], 0] = 1
             labels[positive_topest_index[-1], 1] = i
 
+            # gt_loc: [N, (anchors_index, tx, ty, tw, th)]
+            p_candidate_index.append(positive_topest_index[-1])
+            print('i = ', i)
+            print(len(p_candidate_index))
+            all_anchors_index = np.array(p_candidate_index)
+            all_anchors_xywh = self.anchors_xywh[all_anchors_index, :]
+            gt_locs = np.zeros((len(all_anchors_index), 5))
+            gt_locs[:, 0] = all_anchors_index
+            gt_locs[:, 1] = all_anchors_xywh[:, 0] - gt_bboxes_xywh
+
+
         # 负样本
         negative_candidate_mask = np.stack(negative_candidate_mask)
         # negative_zeros_mask = np.stack(negative_zeros_mask)
@@ -186,7 +203,7 @@ class AnchorCreator:
         anchors_xywh = self.anchors_xywh[positive_mask]
         anchors_xywh_labels = labels[positive_mask]
         gt_loc = np.zeros(anchors_xywh.shape[0], 4)
-        gt_loc[:, 0] =
+        gt_loc[:, 0] = anchors_xywh - gt_bboxes_xywh[i]
 
 
 

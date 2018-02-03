@@ -69,10 +69,8 @@ def generate_pyramid_anchors(scales, ratios, feature_shapes, feature_strides,
 
     # (x1, y1, x2, y2)坐标转换为(x,y,w,h)坐标
     anchors_xywh = np.zeros(anchors.shape)
-    anchors_xywh[:, 0] = (anchors[:, 0] + anchors[:, 2]) * 0.5
-    anchors_xywh[:, 1] = (anchors[:, 1] + anchors[:, 3]) * 0.5
-    anchors_xywh[:, 2] = anchors[:, 2] - anchors[:, 0]
-    anchors_xywh[:, 3] = anchors[:, 3] - anchors[:, 1]
+    anchors_xywh[:, [0, 1]] = (anchors[:, [0, 1]] + anchors[:, [2, 3]]) * 0.5
+    anchors_xywh[:, [2, 3]] = anchors[:, [2, 3]] - anchors[:, [0, 1]]
 
     return anchors, anchors_xywh
 
@@ -107,14 +105,16 @@ def compute_iou(box, boxes, box_area, boxes_area):
 
 class AnchorCreator:
 
-    def __init__(self, anchors, anchors_xywh, max_anchors=256):
+    def __init__(self, anchors, anchors_xywh, threshold, max_anchors=256):
         self.anchors = anchors
         self.anchors_xywh = anchors_xywh
+        self.threshold = threshold
         self.max_anchors = int(max_anchors)
         self.anchors_area = area(anchors)
 
     def create_anchors(self, labels_and_boxes):
-        """生成用于训练RPN网络的anchors
+        """生成用于训练RPN网络的anchors, 参考代码:
+        https://github.com/matterport/Mask_RCNN
         N为anchors的数量
         输入图片的标签和物体的boxes: [N, (class, x1, y1, x2, y2)]
         labels: (N, (属于第几个box, 与boxes对应, 下标从0开始, 用于计算box回归))
@@ -124,6 +124,9 @@ class AnchorCreator:
         positive_topest_index = []
         positive_candidate_index = []
         negative_candidate_mask = []
+
+        # gt_locs: [N, (anchors_index, tx, ty, tw, th)]
+        gt_locs = []
         # negative_zeros_mask = []
         gt_bboxes = labels_and_boxes[:, 1:]
         gt_bboxes_xywh = np.zeros(gt_bboxes.shape)
@@ -152,28 +155,28 @@ class AnchorCreator:
                 # IoU等于0.0的候选框
                 # negative_zeros_mask.append(IoU == 0)
 
-                # 添加labels
+                # 为anchors添加labels
                 labels[p_candidate_index, 0] = 1
                 labels[p_candidate_index, 1] = i
             else:
                 topest = np.argmax(IoU)
                 positive_topest_index.append(topest)
 
-            # 添加labels
+            # 为重叠率最高的anchors添加labels
             labels[positive_topest_index[-1], 0] = 1
             labels[positive_topest_index[-1], 1] = i
 
-            # gt_loc: [N, (anchors_index, tx, ty, tw, th)]
+            # gt_locs_tmp: [N, (anchors_index, tx, ty, tw, th)]
             p_candidate_index.append(positive_topest_index[-1])
             print('i = ', i)
             print(len(p_candidate_index))
             all_anchors_index = np.array(p_candidate_index)
             all_anchors_xywh = self.anchors_xywh[all_anchors_index, :]
-            gt_locs = np.zeros((len(all_anchors_index), 5))
-            gt_locs[:, 0] = all_anchors_index
-            gt_locs[:, [1, 2]] = (all_anchors_xywh[:, [0, 1]] - gt_bboxes_xywh[i, [0, 1]]) / gt_bboxes_xywh[i, [0, 1]]
-            gt_locs[:, [3, 4]] = 
-
+            gt_locs_tmp = np.zeros((len(all_anchors_index), 5))
+            gt_locs_tmp[:, 0] = all_anchors_index
+            gt_locs_tmp[:, [1, 2]] = (all_anchors_xywh[:, [0, 1]] - gt_bboxes_xywh[i, [0, 1]]) / gt_bboxes_xywh[i, [0, 1]]
+            gt_locs_tmp[:, [3, 4]] = np.log(gt_bboxes_xywh[:, [2, 3]] / self.anchors_xywh[:, [2, 3]])
+            gt_locs.append(gt_locs_tmp)
 
         # 负样本
         negative_candidate_mask = np.stack(negative_candidate_mask)
@@ -185,8 +188,17 @@ class AnchorCreator:
         # 正样本数量
         num_p = len(positive_topest_index) + len(positive_candidate_index)
 
-        # 超过预定数量, 则在candidates中随机抽取一些样本丢弃
+        # 对gt_locs排序, 使其与labels中的标签对应
+        gt_locs = np.concatenate(gt_locs, axis=0)
+        gt_locs = gt_locs[gt_locs[:, 0].argsorts()]
+
+        # 超过预定数量, 则在candidates中随机抽取一些样本丢弃. 为了速度起见会在所有lable = 1
+        # 的anchors中抽取. 即不能保证每个object都有对应的anchors. 与object重叠率最大的anchor也
+        # 可能会被丢弃
         num_discard = int(num_p - self.max_anchors / 2)
+
+        #
+        gt_locs = gt_locs[gt_locs]
         if num_discard > 0:
             choice = np.random.choice(positive_candidate_index, size=num_discard)
             labels[choice, 0] = -1
@@ -196,13 +208,6 @@ class AnchorCreator:
         negative_candidate_index = np.where(negative_candidate_mask)
         choice = np.random.choice(negative_candidate_index[0], size=num_p)
         labels[choice] = 0
-
-        # gt_loc计算
-        positive_mask = (labels[:, 0] == 1)
-        anchors_xywh = self.anchors_xywh[positive_mask]
-        anchors_xywh_labels = labels[positive_mask]
-        gt_loc = np.zeros(anchors_xywh.shape[0], 4)
-        gt_loc[:, 0] = anchors_xywh - gt_bboxes_xywh[i]
 
 
 
